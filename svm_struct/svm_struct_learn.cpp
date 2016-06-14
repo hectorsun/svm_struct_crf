@@ -514,12 +514,17 @@ void svm_learn_struct_joint(SAMPLE sample, STRUCT_LEARN_PARM *sparm,
 
   rt1=get_runtime();
 
+  // number of training set for whcih to refresh cache
+  // when no epsilon violated constraint can be constraint
+  // from current cache
   if(sparm->batch_size<100)
     batch_size=sparm->batch_size*n/100.0;
 
   init_struct_model(sample,sm,sparm,lparm,kparm); 
   sizePsi=sm->sizePsi+1;          /* sm must contain size of psi on return */
 
+  // L-norm to use for slack variables
+  // use 1 for L1-norm
   if(sparm->slack_norm == 1) {
     lparm->svm_c=sparm->C;          /* set upper bound C */
     lparm->sharedslack=1;
@@ -542,6 +547,8 @@ void svm_learn_struct_joint(SAMPLE sample, STRUCT_LEARN_PARM *sparm,
 				     using constraints constructed
 				     from the constraint cache */
 
+  // initialize optimization problem.
+  // Tipically, it is empty set of constraints, 
   cset=init_struct_constraints(sample, sm, sparm);
   if(cset.m > 0) {
     alpha=(double *)realloc(alpha,sizeof(double)*cset.m);
@@ -551,6 +558,9 @@ void svm_learn_struct_joint(SAMPLE sample, STRUCT_LEARN_PARM *sparm,
       alphahist[i]=-1; /* -1 makes sure these constraints are never removed */
     }
   }
+  
+  // initialize kernelid to each constraint in cset
+  // and creates the corresponding kernel matrix
   kparm->gram_matrix=NULL;
   if((alg_type == ONESLACK_DUAL_ALG) || (alg_type == ONESLACK_DUAL_CACHE_ALG))
     kparm->gram_matrix=init_kernel_matrix(&cset,kparm);
@@ -559,7 +569,7 @@ void svm_learn_struct_joint(SAMPLE sample, STRUCT_LEARN_PARM *sparm,
   svmModel=(MODEL *)my_malloc(sizeof(MODEL));
   lparm->epsilon_crit=epsilon;
   svm_learn_optimization(cset.lhs,cset.rhs,cset.m,sizePsi,
-			 lparm,kparm,NULL,svmModel,alpha);
+			 lparm,kparm,NULL,svmModel,alpha);// QP subproblem
   add_weight_vector_to_linear_model(svmModel);
   sm->svm_model=svmModel;
   sm->w=svmModel->lin_weights; /* short cut to weight vector */

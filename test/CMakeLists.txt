@@ -1,0 +1,2 @@
+add_executable(sample_write_read sample_write_read.cpp )
+target_link_libraries(sample_write_read svm_light svm_struct)

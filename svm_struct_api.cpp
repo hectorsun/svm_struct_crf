@@ -22,6 +22,73 @@
 #include "svm_struct/svm_struct_common.h"
 #include "svm_struct_api.h"
 
+#include <iostream>
+
+#include <qpbo/QPBO.h>
+
+//////////////////////////////////////////////////////////////////////////////
+
+#include <fstream>
+
+#include <boost/serialization/vector.hpp>
+#include <vector>
+
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>
+#include <opencv2/core.hpp>
+
+
+namespace boost {
+  namespace serialization {
+
+    template<class Archive>
+    inline void serialize(Archive & ar, cv::Mat& m, const unsigned int version)
+    {
+      int cols = m.cols;
+      int rows = m.rows;
+      size_t elemSize = m.elemSize();
+      size_t elemType = m.type();
+
+      ar & BOOST_SERIALIZATION_NVP(cols);
+      ar & BOOST_SERIALIZATION_NVP(rows);
+      ar & BOOST_SERIALIZATION_NVP(elemSize);
+      ar & BOOST_SERIALIZATION_NVP(elemType); // element type.
+
+      if(m.type() != elemType || m.rows != rows || m.cols != cols) {
+        m = cv::Mat(rows, cols, elemType, cv::Scalar(0));
+      }
+
+      size_t dataSize = cols * rows * elemSize;
+
+
+      for (size_t dc = 0; dc < dataSize; dc++) {
+        std::stringstream ss;
+        ss << "elem_"<<dc;
+        ar & boost::serialization::make_nvp(ss.str().c_str(), m.data[dc]);
+      }
+
+    }
+
+    template<class Archive>
+    inline void serialize(Archive & ar, EXAMPLE& e, const unsigned int version)
+    {
+      ar & e.x.unary;
+      ar & e.x.edges;
+      ar & e.x.pairwise;
+      ar & e.y.label;
+    }
+
+    template<class Archive>
+    inline void serialize(Archive & ar, STRUCTMODEL& struct_model, const unsigned int version)
+    {
+
+    }
+
+  }
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
 void        svm_struct_learn_api_init(int argc, char* argv[])
 {
   /* Called in learning part before anything else is done to allow
@@ -51,23 +118,39 @@ SAMPLE      read_struct_examples(char *file, STRUCT_LEARN_PARM *sparm)
   /* Reads struct examples and returns them in sample. The number of
      examples must be written into sample.n */
   SAMPLE   sample;  /* sample */
-  EXAMPLE  *examples;
-  long     n;       /* number of examples */
 
-  n=100; /* replace by appropriate number of examples */
-  examples=(EXAMPLE *)my_malloc(sizeof(EXAMPLE)*n);
+  // We storage examples in a vector,
+  // and serilized into file with boost::serilization
+  std::ifstream ifs(file);
+  boost::archive::text_iarchive ia(ifs);
+  std::vector<EXAMPLE> std_sample;
+  ia >> std_sample;
 
-  /* fill in your code here */
-
-  sample.n=n;
-  sample.examples=examples;
+  sample.n=static_cast<int>(std_sample.size());
+  EXAMPLE* examples = new EXAMPLE[sample.n];
+  for (int i=0; i<sample.n; i++){
+    examples[i].x.unary = (std_sample[i].x.unary);
+    examples[i].x.edges = (std_sample[i].x.edges);
+    examples[i].x.pairwise = (std_sample[i].x.pairwise);
+    examples[i].y.label = (std_sample[i].y.label);
+  }
+  sample.examples = examples;
   return(sample);
 }
 
-void write_sturct_examples(char *file, SAMPLE sample)
+void write_struct_examples(char *file, SAMPLE& sample)
 {
   
-  
+  std::ofstream ofs(file);
+  boost::archive::text_oarchive oa(ofs);
+  std::vector<EXAMPLE> std_sample(sample.n);
+  for (int i=0; i<sample.n; i++){
+    std_sample[i].x.unary = sample.examples[i].x.unary;
+    std_sample[i].x.edges = sample.examples[i].x.edges;
+    std_sample[i].x.pairwise = sample.examples[i].x.pairwise;
+    std_sample[i].y.label = sample.examples[i].y.label;
+  }
+  oa<<std_sample;
 }
 
 void        init_struct_model(SAMPLE sample, STRUCTMODEL *sm, 
@@ -135,7 +218,26 @@ LABEL       classify_struct_example(PATTERN x, STRUCTMODEL *sm,
   LABEL y;
 
   /* insert your code for computing the predicted label y here */
+  int num_nodes = x.unary.size[0];
+  int num_edges = x.edges.size[0];
+  QPBO<float>* q = new QPBO<float>(num_nodes, num_edges);
+  q->AddNode(num_nodes); // add nodes
+  for (int i=0; i<num_nodes; i++){
+    //q->AddUnaryTerm(i);
+  }
+  for (int i=0; i<num_edges; i++){
+    //q->addPairwiseterm(x.edges.at<int>(i,0), x.edges.at<int>(i,1), ); // add term
+  }
 
+  
+  q->Solve();
+  q->ComputeWeakPersistencies();
+
+  y.label.create(num_nodes, 1, CV_32S);
+  for (int i=0; i<num_nodes; i++){
+    y.label.at<int>(i, 0) = q->GetLabel(i);
+  }
+  
   return(y);
 }
 
@@ -253,6 +355,18 @@ double      loss(LABEL y, LABEL ybar, STRUCT_LEARN_PARM *sparm)
     /* Put your code for different loss functions here. But then
        find_most_violated_constraint_???(x, y, sm) has to return the
        highest scoring label with the largest loss. */
+
+    // hamming loss for image segmentation
+    // loss = \frac{number_of_unequal_labels}{total_numbel_of_labels}
+    int num_total = y.label.size[0];
+    int num_unmatch=0;
+    for (int i=0; i<y.label.size[0]; i++){
+      if (y.label.at<int>(i, 0) != ybar.label.at<int>(i,0) ){
+        num_unmatch++;
+      }
+    }
+    return static_cast<double>(num_unmatch)/ static_cast<double>(num_total);
+    
   }
 }
 
@@ -302,17 +416,26 @@ void        write_struct_model(char *file, STRUCTMODEL *sm,
 			       STRUCT_LEARN_PARM *sparm)
 {
   /* Writes structural model sm to file file. */
+  std::ofstream ofs(file);
+  boost::archive::text_oarchive oa(ofs);
+  oa<<*sm;
 }
 
 STRUCTMODEL read_struct_model(char *file, STRUCT_LEARN_PARM *sparm)
 {
   /* Reads structural model sm from file file. This function is used
      only in the prediction module, not in the learning module. */
+  STRUCTMODEL struct_model;
+  std::ifstream ifs(file);
+  boost::archive::text_iarchive ia(ifs);
+  ia >>  struct_model;
+  return struct_model;
 }
 
 void        write_label(FILE *fp, LABEL y)
 {
   /* Writes label y to file handle fp. */
+
 } 
 
 void        free_pattern(PATTERN x) {

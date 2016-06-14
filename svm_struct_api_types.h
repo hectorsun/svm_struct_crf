@@ -23,6 +23,8 @@
 # include "svm_light/svm_common.h"
 # include "svm_light/svm_learn.h"
 
+#include <opencv2/core.hpp>
+
 # define INST_NAME          "Generic and empty API"
 # define INST_VERSION       "V0.00"
 # define INST_VERSION_DATE  "??.??.??"
@@ -56,13 +58,19 @@
 typedef struct pattern {
   /* this defines the x-part of a training example, e.g. the structure
      for storing a natural language sentence in NLP parsing */
-  int add_your_variables_here;
+  cv::Mat unary;
+  cv::Mat edges;
+  cv::Mat pairwise;
+  //int add_your_variables_here;
 } PATTERN;
 
 typedef struct label {
   /* this defines the y-part (the label) of a training example,
      e.g. the parse tree of the corresponding sentence. */
-  int add_your_variables_here;
+  cv::Mat label;  //< class labels
+  int num_classes;//< total number of classes
+  double* scores; //< values of function of each class
+  //int add_your_variables_here;
 } LABEL;
 
 typedef struct structmodel {
@@ -72,7 +80,7 @@ typedef struct structmodel {
   double walpha;
   /* other information that is needed for the stuctural model can be
      added here, e.g. the grammar rules for NLP parsing */
-  int add_your_variables_here;
+  //int add_your_variables_here;
 } STRUCTMODEL;
 
 typedef struct struct_learn_parm {
@@ -101,7 +109,8 @@ typedef struct struct_learn_parm {
 				  functions via -l command line
 				  option */
   /* further parameters that are passed to init_struct_model() */
-  int add_your_variables_here;
+  //int add_your_variables_here;
+  int num_classes;
 } STRUCT_LEARN_PARM;
 
 typedef struct struct_test_stats {
